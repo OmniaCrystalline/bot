@@ -1,9 +1,0 @@
-services:
-  - type: web
-    name: domain-checker-bot
-    env: node
-    buildCommand: npm install
-    startCommand: node index.js
-    envVars:
-      - key: BOT_TOKEN
-        sync: false 
