@@ -170,8 +170,8 @@ bot.onText(/\/start/, (msg) => {
     chatId,
     "Вітаю! Я бот для перевірки доменів.\n\n" +
       "Доступні команди:\n" +
-      "/add domain.com - додати домен до списку\n" +
-      "/remove domain.com - видалити домен зі списку\n" +
+      "/add domain1.com, domain2.com - додати один або кілька доменів до списку\n" +
+      "/remove domain1.com, domain2.com - видалити один або кілька доменів зі списку\n" +
       "/list - показати список доменів\n" +
       "/check - перевірити всі домени в списку\n" +
       "/autocheck - увімкнути автоматичну перевірку о 12:00 щодня\n\n" +
@@ -188,35 +188,92 @@ bot.onText(/\/start/, (msg) => {
   startAutoCheck(chatId);
 });
 
-// Добавление домена
+// Добавление доменов
 bot.onText(/\/add (.+)/, (msg, match) => {
   const chatId = msg.chat.id;
   try {
-    const domain = normalizeDomain(match[1]);
+    // Разбиваем строку на домены по запятой
+    const domains = match[1].split(",").map((d) => d.trim());
 
     if (!userDomains.has(chatId)) {
       userDomains.set(chatId, new Set());
     }
 
-    userDomains.get(chatId).add(domain);
-    bot.sendMessage(chatId, `Домен ${domain} додано до списку!`);
+    const addedDomains = [];
+    const errors = [];
+
+    // Обрабатываем каждый домен
+    for (const domain of domains) {
+      try {
+        const normalizedDomain = normalizeDomain(domain);
+        userDomains.get(chatId).add(normalizedDomain);
+        addedDomains.push(normalizedDomain);
+      } catch (error) {
+        errors.push(`${domain}: ${error.message}`);
+      }
+    }
+
+    // Формируем сообщение о результатах
+    let message = "";
+    if (addedDomains.length > 0) {
+      message += `✅ Успішно додано доменів: ${addedDomains.length}\n`;
+      message += addedDomains.join("\n") + "\n\n";
+    }
+
+    if (errors.length > 0) {
+      message += `❌ Помилки при додаванні:\n`;
+      message += errors.join("\n");
+    }
+
+    bot.sendMessage(chatId, message || "Не вдалося додати жодного домену");
   } catch (error) {
     bot.sendMessage(chatId, `Помилка: ${error.message}`);
   }
 });
 
-// Удаление домена
+// Удаление доменов
 bot.onText(/\/remove (.+)/, (msg, match) => {
   const chatId = msg.chat.id;
   try {
-    const domain = normalizeDomain(match[1]);
+    // Разбиваем строку на домены по запятой
+    const domains = match[1].split(",").map((d) => d.trim());
 
-    if (userDomains.has(chatId) && userDomains.get(chatId).has(domain)) {
-      userDomains.get(chatId).delete(domain);
-      bot.sendMessage(chatId, `Домен ${domain} видалено зі списку!`);
-    } else {
-      bot.sendMessage(chatId, "Домен не знайдено в списку!");
+    if (!userDomains.has(chatId)) {
+      bot.sendMessage(chatId, "Список доменів порожній!");
+      return;
     }
+
+    const removedDomains = [];
+    const notFoundDomains = [];
+
+    // Обрабатываем каждый домен
+    for (const domain of domains) {
+      try {
+        const normalizedDomain = normalizeDomain(domain);
+        if (userDomains.get(chatId).has(normalizedDomain)) {
+          userDomains.get(chatId).delete(normalizedDomain);
+          removedDomains.push(normalizedDomain);
+        } else {
+          notFoundDomains.push(normalizedDomain);
+        }
+      } catch (error) {
+        notFoundDomains.push(`${domain}: ${error.message}`);
+      }
+    }
+
+    // Формируем сообщение о результатах
+    let message = "";
+    if (removedDomains.length > 0) {
+      message += `✅ Успішно видалено доменів: ${removedDomains.length}\n`;
+      message += removedDomains.join("\n") + "\n\n";
+    }
+
+    if (notFoundDomains.length > 0) {
+      message += `❌ Не знайдено в списку:\n`;
+      message += notFoundDomains.join("\n");
+    }
+
+    bot.sendMessage(chatId, message || "Не вдалося видалити жодного домену");
   } catch (error) {
     bot.sendMessage(chatId, `Помилка: ${error.message}`);
   }
