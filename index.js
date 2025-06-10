@@ -3,9 +3,15 @@
 require("dotenv").config();
 const TelegramBot = require("node-telegram-bot-api");
 const axios = require("axios");
+const express = require("express");
 
-// Инициализация бота
-const bot = new TelegramBot(process.env.BOT_TOKEN, { polling: true });
+const app = express();
+app.use(express.json());
+
+// Инициализация бота с webhook
+const bot = new TelegramBot(process.env.BOT_TOKEN);
+const WEBHOOK_URL =
+  process.env.WEBHOOK_URL || "https://your-app-name.onrender.com";
 
 // Хранение списка доменов для каждого пользователя
 const userDomains = new Map();
@@ -135,4 +141,22 @@ bot.onText(/\/autocheck/, (msg) => {
     chatId,
     "Автоматическая проверка доменов включена! Проверка будет выполняться каждые 12 часов."
   );
+});
+
+// Настройка webhook
+app.post(`/webhook`, (req, res) => {
+  bot.processUpdate(req.body);
+  res.sendStatus(200);
+});
+
+// Запуск сервера
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, async () => {
+  console.log(`Server is running on port ${PORT}`);
+  try {
+    await bot.setWebHook(`${WEBHOOK_URL}/webhook`);
+    console.log("Webhook установлен успешно");
+  } catch (error) {
+    console.error("Ошибка при установке webhook:", error);
+  }
 });
