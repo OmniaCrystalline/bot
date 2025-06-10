@@ -4,29 +4,66 @@ require("dotenv").config();
 const TelegramBot = require("node-telegram-bot-api");
 const axios = require("axios");
 
-// Инициализация бота с polling и обработкой ошибок
-const bot = new TelegramBot(process.env.BOT_TOKEN, {
-  polling: {
-    interval: 300,
-    autoStart: true,
-    params: {
-      timeout: 10,
-    },
-  },
-});
+// Функция для инициализации бота
+async function initializeBot() {
+  try {
+    // Сначала удаляем все webhook'и
+    const tempBot = new TelegramBot(process.env.BOT_TOKEN);
+    await tempBot.deleteWebHook();
 
-// Обработка ошибок polling
-bot.on("polling_error", (error) => {
-  console.error("Polling error:", error.message);
-  if (error.message.includes("409 Conflict")) {
-    console.log("Перезапуск polling...");
-    bot.stopPolling().then(() => {
-      setTimeout(() => {
-        bot.startPolling();
-      }, 1000);
+    // Создаем основной экземпляр бота
+    const bot = new TelegramBot(process.env.BOT_TOKEN, {
+      polling: {
+        interval: 300,
+        autoStart: true,
+        params: {
+          timeout: 10,
+        },
+      },
     });
+
+    // Обработка ошибок polling
+    bot.on("polling_error", async (error) => {
+      console.error("Polling error:", error.message);
+      if (error.message.includes("409 Conflict")) {
+        console.log("Спроба вирішити конфлікт polling...");
+        try {
+          // Останавливаем текущий polling
+          await bot.stopPolling();
+          // Удаляем webhook
+          await bot.deleteWebHook();
+          // Ждем немного
+          await new Promise((resolve) => setTimeout(resolve, 2000));
+          // Запускаем polling заново
+          await bot.startPolling();
+          console.log("Polling успішно перезапущено");
+        } catch (restartError) {
+          console.error(
+            "Помилка при перезапуску polling:",
+            restartError.message
+          );
+        }
+      }
+    });
+
+    return bot;
+  } catch (error) {
+    console.error("Помилка при ініціалізації бота:", error.message);
+    throw error;
   }
-});
+}
+
+// Инициализация бота
+let bot;
+initializeBot()
+  .then((initializedBot) => {
+    bot = initializedBot;
+    console.log("Бот успішно ініціалізовано");
+  })
+  .catch((error) => {
+    console.error("Не вдалося ініціалізувати бота:", error.message);
+    process.exit(1);
+  });
 
 // Хранение списка доменов для каждого пользователя
 const userDomains = new Map();
