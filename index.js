@@ -4,8 +4,29 @@ require("dotenv").config();
 const TelegramBot = require("node-telegram-bot-api");
 const axios = require("axios");
 
-// Инициализация бота с polling
-const bot = new TelegramBot(process.env.BOT_TOKEN, { polling: true });
+// Инициализация бота с polling и обработкой ошибок
+const bot = new TelegramBot(process.env.BOT_TOKEN, {
+  polling: {
+    interval: 300,
+    autoStart: true,
+    params: {
+      timeout: 10,
+    },
+  },
+});
+
+// Обработка ошибок polling
+bot.on("polling_error", (error) => {
+  console.error("Polling error:", error.message);
+  if (error.message.includes("409 Conflict")) {
+    console.log("Перезапуск polling...");
+    bot.stopPolling().then(() => {
+      setTimeout(() => {
+        bot.startPolling();
+      }, 1000);
+    });
+  }
+});
 
 // Хранение списка доменов для каждого пользователя
 const userDomains = new Map();
