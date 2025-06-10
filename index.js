@@ -3,9 +3,47 @@
 require("dotenv").config();
 const TelegramBot = require("node-telegram-bot-api");
 const axios = require("axios");
+const fs = require("fs");
+const path = require("path");
+
+// Путь к файлу с доменами
+const DOMAINS_FILE = path.join(__dirname, "domains.json");
+
+// Функция для загрузки доменов из файла
+function loadDomains() {
+  try {
+    if (fs.existsSync(DOMAINS_FILE)) {
+      const data = fs.readFileSync(DOMAINS_FILE, "utf8");
+      const domains = JSON.parse(data);
+      // Преобразуем обычные объекты обратно в Map
+      const userDomains = new Map();
+      for (const [chatId, domainSet] of Object.entries(domains)) {
+        userDomains.set(chatId, new Set(domainSet));
+      }
+      return userDomains;
+    }
+  } catch (error) {
+    console.error("Помилка при завантаженні доменів:", error);
+  }
+  return new Map();
+}
+
+// Функция для сохранения доменов в файл
+function saveDomains(userDomains) {
+  try {
+    // Преобразуем Map в обычный объект для сохранения
+    const domains = {};
+    for (const [chatId, domainSet] of userDomains.entries()) {
+      domains[chatId] = Array.from(domainSet);
+    }
+    fs.writeFileSync(DOMAINS_FILE, JSON.stringify(domains, null, 2));
+  } catch (error) {
+    console.error("Помилка при збереженні доменів:", error);
+  }
+}
 
 // Хранение списка доменов для каждого пользователя
-const userDomains = new Map();
+const userDomains = loadDomains();
 
 // Функция для валидации домена
 function isValidDomain(domain) {
@@ -33,8 +71,8 @@ function normalizeDomain(domain) {
     // Убираем www. если есть
     domain = domain.replace(/^www\./, "");
 
-    // Убираем все недопустимые символы, оставляя только буквы, цифры, точки и дефисы
-    domain = domain.replace(/[^a-zA-Z0-9.-]/g, "");
+    // Убираем все недопустимые символы, оставляя только буквы, цифры, точки, дефисы и подчеркивания
+    domain = domain.replace(/[^a-zA-Z0-9._-]/g, "");
 
     // Проверяем, что домен не пустой после очистки
     if (!domain) {
@@ -61,6 +99,23 @@ function normalizeDomain(domain) {
     // Проверяем, что нет двух точек или дефисов подряд
     if (domain.includes("..") || domain.includes("--")) {
       throw new Error("Домен не може містити дві точки або дефіси підряд");
+    }
+
+    // Проверяем длину каждой части домена
+    const parts = domain.split(".");
+    for (const part of parts) {
+      if (part.length > 63) {
+        throw new Error(
+          "Кожна частина домену не може бути довшою за 63 символи"
+        );
+      }
+    }
+
+    // Проверяем общую длину домена
+    if (domain.length > 255) {
+      throw new Error(
+        "Загальна довжина домену не може перевищувати 255 символів"
+      );
     }
 
     return domain.toLowerCase();
@@ -236,7 +291,7 @@ async function initializeBot() {
       try {
         // Получаем текст сообщения
         const text = msg.text;
-        console.log("Отримано повідомлення:", text);
+        console.log("Отримано повне повідомлення:", text);
 
         // Убираем команду /add и разбиваем на строки
         const domainsText = text.replace(/^\/add\s*/, "").trim();
@@ -248,7 +303,7 @@ async function initializeBot() {
           .map((d) => d.trim()) // Убираем пробелы
           .filter((d) => d.length > 0); // Убираем пустые строки
 
-        console.log("Розділені домени:", domains);
+        console.log("Розділені домени (сирий список):", domains);
 
         if (!userDomains.has(chatId)) {
           userDomains.set(chatId, new Set());
@@ -274,6 +329,9 @@ async function initializeBot() {
           }
         }
 
+        // Сохраняем домены после добавления
+        saveDomains(userDomains);
+
         // Формируем сообщение о результатах
         let message = "";
         if (addedDomains.length > 0) {
@@ -294,11 +352,15 @@ async function initializeBot() {
       }
     });
 
-    bot.onText(/\/remove (.+)/, (msg, match) => {
+    bot.onText(/\/remove/, (msg) => {
       const chatId = msg.chat.id;
       try {
-        // Разбиваем строку на домены по запятой
-        const domains = match[1].split(",").map((d) => d.trim());
+        const text = msg.text;
+        const domainsText = text.replace(/^\/remove\s*/, "").trim();
+        const domains = domainsText
+          .split(/[\n,]+/)
+          .map((d) => d.trim())
+          .filter((d) => d.length > 0);
 
         if (!userDomains.has(chatId)) {
           bot.sendMessage(chatId, "Список доменів порожній!");
@@ -308,7 +370,6 @@ async function initializeBot() {
         const removedDomains = [];
         const notFoundDomains = [];
 
-        // Обрабатываем каждый домен
         for (const domain of domains) {
           try {
             const normalizedDomain = normalizeDomain(domain);
@@ -323,7 +384,9 @@ async function initializeBot() {
           }
         }
 
-        // Формируем сообщение о результатах
+        // Сохраняем домены после удаления
+        saveDomains(userDomains);
+
         let message = "";
         if (removedDomains.length > 0) {
           message += `✅ Успішно видалено доменів: ${removedDomains.length}\n`;
