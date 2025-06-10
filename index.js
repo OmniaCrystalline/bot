@@ -33,12 +33,37 @@ function normalizeDomain(domain) {
     // Убираем www. если есть
     domain = domain.replace(/^www\./, "");
 
-    // Проверяем валидность домена
-    if (!isValidDomain(domain)) {
-      throw new Error("Невірний формат домену");
+    // Убираем все недопустимые символы, оставляя только буквы, цифры, точки и дефисы
+    domain = domain.replace(/[^a-zA-Z0-9.-]/g, "");
+
+    // Проверяем, что домен не пустой после очистки
+    if (!domain) {
+      throw new Error("Домен порожній після очищення");
     }
 
-    return domain;
+    // Проверяем, что домен содержит хотя бы одну точку
+    if (!domain.includes(".")) {
+      throw new Error("Домен повинен містити хоча б одну точку");
+    }
+
+    // Проверяем, что домен не начинается и не заканчивается точкой или дефисом
+    if (
+      domain.startsWith(".") ||
+      domain.endsWith(".") ||
+      domain.startsWith("-") ||
+      domain.endsWith("-")
+    ) {
+      throw new Error(
+        "Домен не може починатися або закінчуватися точкою або дефісом"
+      );
+    }
+
+    // Проверяем, что нет двух точек или дефисов подряд
+    if (domain.includes("..") || domain.includes("--")) {
+      throw new Error("Домен не може містити дві точки або дефіси підряд");
+    }
+
+    return domain.toLowerCase();
   } catch (error) {
     throw new Error("Помилка при обробці домену: " + error.message);
   }
@@ -209,11 +234,19 @@ async function initializeBot() {
     bot.onText(/\/add (.+)/, (msg, match) => {
       const chatId = msg.chat.id;
       try {
-        // Разбиваем строку на домены по запятой
-        const domains = match[1].split(",").map((d) => d.trim());
+        console.log("Отримано команду /add з параметрами:", match[1]);
+
+        // Разбиваем строку на домены по запятой или переносу строки
+        const domains = match[1]
+          .split(/[,\n]/) // Разделяем по запятой или переносу строки
+          .map((d) => d.trim()) // Убираем пробелы
+          .filter((d) => d.length > 0); // Убираем пустые строки
+
+        console.log("Розділені домени:", domains);
 
         if (!userDomains.has(chatId)) {
           userDomains.set(chatId, new Set());
+          console.log("Створено новий набір доменів для chatId:", chatId);
         }
 
         const addedDomains = [];
@@ -222,10 +255,15 @@ async function initializeBot() {
         // Обрабатываем каждый домен
         for (const domain of domains) {
           try {
+            console.log("Спроба нормалізації домену:", domain);
             const normalizedDomain = normalizeDomain(domain);
+            console.log("Нормалізований домен:", normalizedDomain);
+
             userDomains.get(chatId).add(normalizedDomain);
             addedDomains.push(normalizedDomain);
+            console.log("Домен успішно додано:", normalizedDomain);
           } catch (error) {
+            console.error("Помилка при обробці домену:", domain, error.message);
             errors.push(`${domain}: ${error.message}`);
           }
         }
@@ -242,8 +280,10 @@ async function initializeBot() {
           message += errors.join("\n");
         }
 
+        console.log("Відправляємо повідомлення:", message);
         bot.sendMessage(chatId, message || "Не вдалося додати жодного домену");
       } catch (error) {
+        console.error("Загальна помилка при додаванні доменів:", error);
         bot.sendMessage(chatId, `Помилка: ${error.message}`);
       }
     });
