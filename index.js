@@ -69,22 +69,77 @@ async function sendCheckResults(chatId) {
   }
 
   const domains = Array.from(userDomains.get(chatId));
-  let results = "🕒 Автоматична перевірка доменів:\n\n";
+  const results = [];
 
+  // Проверяем все домены и сохраняем результаты
   for (const domain of domains) {
     const isAvailable = await checkDomain(domain);
-    results += `${domain}: ${isAvailable ? "✅" : "❌"}\n`;
+    results.push({
+      domain: domain,
+      isAvailable: isAvailable,
+    });
   }
 
-  bot.sendMessage(chatId, results);
+  // Сортируем результаты: сначала недоступные, потом доступные
+  results.sort((a, b) => {
+    if (a.isAvailable === b.isAvailable) {
+      return a.domain.localeCompare(b.domain); // Сортировка по алфавиту внутри групп
+    }
+    return a.isAvailable ? 1 : -1; // Недоступные сначала
+  });
+
+  // Формируем сообщение
+  let message = "🕒 Автоматична перевірка доменів:\n\n";
+
+  // Добавляем недоступные домены
+  const unavailableDomains = results.filter((r) => !r.isAvailable);
+  if (unavailableDomains.length > 0) {
+    message += "❌ Недоступні домени:\n";
+    unavailableDomains.forEach((r) => {
+      message += `${r.domain}\n`;
+    });
+    message += "\n";
+  }
+
+  // Добавляем доступные домены
+  const availableDomains = results.filter((r) => r.isAvailable);
+  if (availableDomains.length > 0) {
+    message += "✅ Доступні домени:\n";
+    availableDomains.forEach((r) => {
+      message += `${r.domain}\n`;
+    });
+  }
+
+  bot.sendMessage(chatId, message);
 }
 
 // Функция для запуска автоматической проверки
 function startAutoCheck(chatId) {
-  // Проверка каждые 12 часов (12 * 60 * 60 * 1000 миллисекунд)
-  setInterval(() => {
-    sendCheckResults(chatId);
-  }, 12 * 60 * 60 * 1000);
+  // Функция для расчета времени до следующей проверки
+  function getTimeUntilNextCheck() {
+    const now = new Date();
+    const nextCheck = new Date(now);
+    nextCheck.setHours(12, 0, 0, 0);
+
+    // Если текущее время уже после 12:00, планируем на следующий день
+    if (now > nextCheck) {
+      nextCheck.setDate(nextCheck.getDate() + 1);
+    }
+
+    return nextCheck.getTime() - now.getTime();
+  }
+
+  // Функция для планирования следующей проверки
+  function scheduleNextCheck() {
+    const timeUntilNextCheck = getTimeUntilNextCheck();
+    setTimeout(() => {
+      sendCheckResults(chatId);
+      scheduleNextCheck(); // Планируем следующую проверку
+    }, timeUntilNextCheck);
+  }
+
+  // Запускаем первую проверку
+  scheduleNextCheck();
 }
 
 // Обработка команды /start
@@ -98,7 +153,7 @@ bot.onText(/\/start/, (msg) => {
       "/remove domain.com - видалити домен зі списку\n" +
       "/list - показати список доменів\n" +
       "/check - перевірити всі домени в списку\n" +
-      "/autocheck - увімкнути автоматичну перевірку кожні 12 годин\n\n" +
+      "/autocheck - увімкнути автоматичну перевірку о 12:00 щодня\n\n" +
       "Ви можете додавати домени у будь-якому форматі:\n" +
       "- domain.com\n" +
       "- domain . com\n" +
@@ -169,14 +224,48 @@ bot.onText(/\/check/, async (msg) => {
   }
 
   const domains = Array.from(userDomains.get(chatId));
-  let results = "Результати перевірки:\n\n";
+  const results = [];
 
+  // Проверяем все домены и сохраняем результаты
   for (const domain of domains) {
     const isAvailable = await checkDomain(domain);
-    results += `${domain}: ${isAvailable ? "✅" : "❌"}\n`;
+    results.push({
+      domain: domain,
+      isAvailable: isAvailable,
+    });
   }
 
-  bot.sendMessage(chatId, results);
+  // Сортируем результаты: сначала недоступные, потом доступные
+  results.sort((a, b) => {
+    if (a.isAvailable === b.isAvailable) {
+      return a.domain.localeCompare(b.domain); // Сортировка по алфавиту внутри групп
+    }
+    return a.isAvailable ? 1 : -1; // Недоступные сначала
+  });
+
+  // Формируем сообщение
+  let message = "Результати перевірки:\n\n";
+
+  // Добавляем недоступные домены
+  const unavailableDomains = results.filter((r) => !r.isAvailable);
+  if (unavailableDomains.length > 0) {
+    message += "❌ Недоступні домени:\n";
+    unavailableDomains.forEach((r) => {
+      message += `${r.domain}\n`;
+    });
+    message += "\n";
+  }
+
+  // Добавляем доступные домены
+  const availableDomains = results.filter((r) => r.isAvailable);
+  if (availableDomains.length > 0) {
+    message += "✅ Доступні домени:\n";
+    availableDomains.forEach((r) => {
+      message += `${r.domain}\n`;
+    });
+  }
+
+  bot.sendMessage(chatId, message);
 });
 
 // Команда для включения автоматической проверки
@@ -185,6 +274,6 @@ bot.onText(/\/autocheck/, (msg) => {
   startAutoCheck(chatId);
   bot.sendMessage(
     chatId,
-    "Автоматична перевірка доменів увімкнена! Перевірка буде виконуватися кожні 12 годин."
+    "Автоматична перевірка доменів увімкнена! Перевірка буде виконуватися о 12:00 щодня."
   );
 });
