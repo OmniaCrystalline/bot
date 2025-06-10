@@ -3,17 +3,49 @@
 require("dotenv").config();
 const TelegramBot = require("node-telegram-bot-api");
 const axios = require("axios");
-const express = require("express");
 
-const app = express();
-app.use(express.json());
-
-// Инициализация бота с webhook
-const bot = new TelegramBot(process.env.BOT_TOKEN);
-const WEBHOOK_URL = process.env.WEBHOOK_URL || "https://bot-2m94.onrender.com";
+// Инициализация бота с polling
+const bot = new TelegramBot(process.env.BOT_TOKEN, { polling: true });
 
 // Хранение списка доменов для каждого пользователя
 const userDomains = new Map();
+
+// Функция для валидации домена
+function isValidDomain(domain) {
+  // Проверяем, что домен соответствует формату
+  const domainRegex =
+    /^[a-zA-Z0-9][a-zA-Z0-9-]{0,61}[a-zA-Z0-9](?:\.[a-zA-Z]{2,})+$/;
+  return domainRegex.test(domain);
+}
+
+// Функция для нормализации домена
+function normalizeDomain(domain) {
+  try {
+    // Убираем пробелы
+    domain = domain.trim();
+
+    // Убираем http:// или https:// если есть
+    domain = domain.replace(/^https?:\/\//, "");
+
+    // Убираем все пробелы в домене
+    domain = domain.replace(/\s+/g, "");
+
+    // Убираем слеш в конце если есть
+    domain = domain.replace(/\/$/, "");
+
+    // Убираем www. если есть
+    domain = domain.replace(/^www\./, "");
+
+    // Проверяем валидность домена
+    if (!isValidDomain(domain)) {
+      throw new Error("Невірний формат домену");
+    }
+
+    return domain;
+  } catch (error) {
+    throw new Error("Помилка при обробці домену: " + error.message);
+  }
+}
 
 // Функция для проверки доступности домена
 async function checkDomain(domain) {
@@ -37,7 +69,7 @@ async function sendCheckResults(chatId) {
   }
 
   const domains = Array.from(userDomains.get(chatId));
-  let results = "🕒 Автоматическая проверка доменов:\n\n";
+  let results = "🕒 Автоматична перевірка доменів:\n\n";
 
   for (const domain of domains) {
     const isAvailable = await checkDomain(domain);
@@ -60,13 +92,20 @@ bot.onText(/\/start/, (msg) => {
   const chatId = msg.chat.id;
   bot.sendMessage(
     chatId,
-    "Привет! Я бот для проверки доменов.\n\n" +
-      "Доступные команды:\n" +
-      "/add domain.com - добавить домен в список\n" +
-      "/remove domain.com - удалить домен из списка\n" +
-      "/list - показать список доменов\n" +
-      "/check - проверить все домены в списке\n" +
-      "/autocheck - включить автоматическую проверку каждые 12 часов"
+    "Вітаю! Я бот для перевірки доменів.\n\n" +
+      "Доступні команди:\n" +
+      "/add domain.com - додати домен до списку\n" +
+      "/remove domain.com - видалити домен зі списку\n" +
+      "/list - показати список доменів\n" +
+      "/check - перевірити всі домени в списку\n" +
+      "/autocheck - увімкнути автоматичну перевірку кожні 12 годин\n\n" +
+      "Ви можете додавати домени у будь-якому форматі:\n" +
+      "- domain.com\n" +
+      "- domain . com\n" +
+      "- http://domain.com\n" +
+      "- https://domain.com\n" +
+      "- www.domain.com\n\n" +
+      "Підтримуються будь-які домени з будь-якими TLD (наприклад: .com, .net, .org, .ru, .ua тощо)"
   );
 
   // Запускаем автоматическую проверку при старте
@@ -76,26 +115,34 @@ bot.onText(/\/start/, (msg) => {
 // Добавление домена
 bot.onText(/\/add (.+)/, (msg, match) => {
   const chatId = msg.chat.id;
-  const domain = match[1].trim();
+  try {
+    const domain = normalizeDomain(match[1]);
 
-  if (!userDomains.has(chatId)) {
-    userDomains.set(chatId, new Set());
+    if (!userDomains.has(chatId)) {
+      userDomains.set(chatId, new Set());
+    }
+
+    userDomains.get(chatId).add(domain);
+    bot.sendMessage(chatId, `Домен ${domain} додано до списку!`);
+  } catch (error) {
+    bot.sendMessage(chatId, `Помилка: ${error.message}`);
   }
-
-  userDomains.get(chatId).add(domain);
-  bot.sendMessage(chatId, `Домен ${domain} добавлен в список!`);
 });
 
 // Удаление домена
 bot.onText(/\/remove (.+)/, (msg, match) => {
   const chatId = msg.chat.id;
-  const domain = match[1].trim();
+  try {
+    const domain = normalizeDomain(match[1]);
 
-  if (userDomains.has(chatId) && userDomains.get(chatId).has(domain)) {
-    userDomains.get(chatId).delete(domain);
-    bot.sendMessage(chatId, `Домен ${domain} удален из списка!`);
-  } else {
-    bot.sendMessage(chatId, "Домен не найден в списке!");
+    if (userDomains.has(chatId) && userDomains.get(chatId).has(domain)) {
+      userDomains.get(chatId).delete(domain);
+      bot.sendMessage(chatId, `Домен ${domain} видалено зі списку!`);
+    } else {
+      bot.sendMessage(chatId, "Домен не знайдено в списку!");
+    }
+  } catch (error) {
+    bot.sendMessage(chatId, `Помилка: ${error.message}`);
   }
 });
 
@@ -104,12 +151,12 @@ bot.onText(/\/list/, (msg) => {
   const chatId = msg.chat.id;
 
   if (!userDomains.has(chatId) || userDomains.get(chatId).size === 0) {
-    bot.sendMessage(chatId, "Список доменов пуст!");
+    bot.sendMessage(chatId, "Список доменів порожній!");
     return;
   }
 
   const domains = Array.from(userDomains.get(chatId)).join("\n");
-  bot.sendMessage(chatId, `Ваш список доменов:\n${domains}`);
+  bot.sendMessage(chatId, `Ваш список доменів:\n${domains}`);
 });
 
 // Проверка всех доменов
@@ -117,12 +164,12 @@ bot.onText(/\/check/, async (msg) => {
   const chatId = msg.chat.id;
 
   if (!userDomains.has(chatId) || userDomains.get(chatId).size === 0) {
-    bot.sendMessage(chatId, "Список доменов пуст!");
+    bot.sendMessage(chatId, "Список доменів порожній!");
     return;
   }
 
   const domains = Array.from(userDomains.get(chatId));
-  let results = "Результаты проверки:\n\n";
+  let results = "Результати перевірки:\n\n";
 
   for (const domain of domains) {
     const isAvailable = await checkDomain(domain);
@@ -138,24 +185,6 @@ bot.onText(/\/autocheck/, (msg) => {
   startAutoCheck(chatId);
   bot.sendMessage(
     chatId,
-    "Автоматическая проверка доменов включена! Проверка будет выполняться каждые 12 часов."
+    "Автоматична перевірка доменів увімкнена! Перевірка буде виконуватися кожні 12 годин."
   );
-});
-
-// Настройка webhook
-app.post(`/webhook`, (req, res) => {
-  bot.processUpdate(req.body);
-  res.sendStatus(200);
-});
-
-// Запуск сервера
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, async () => {
-  console.log(`Server is running on port ${PORT}`);
-  try {
-    await bot.setWebHook(`${WEBHOOK_URL}/webhook`);
-    console.log("Webhook установлен успешно");
-  } catch (error) {
-    console.error("Ошибка при установке webhook:", error);
-  }
 });
