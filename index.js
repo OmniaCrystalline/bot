@@ -4,67 +4,6 @@ require("dotenv").config();
 const TelegramBot = require("node-telegram-bot-api");
 const axios = require("axios");
 
-// Функция для инициализации бота
-async function initializeBot() {
-  try {
-    // Сначала удаляем все webhook'и
-    const tempBot = new TelegramBot(process.env.BOT_TOKEN);
-    await tempBot.deleteWebHook();
-
-    // Создаем основной экземпляр бота
-    const bot = new TelegramBot(process.env.BOT_TOKEN, {
-      polling: {
-        interval: 300,
-        autoStart: true,
-        params: {
-          timeout: 10,
-        },
-      },
-    });
-
-    // Обработка ошибок polling
-    bot.on("polling_error", async (error) => {
-      console.error("Polling error:", error.message);
-      if (error.message.includes("409 Conflict")) {
-        console.log("Спроба вирішити конфлікт polling...");
-        try {
-          // Останавливаем текущий polling
-          await bot.stopPolling();
-          // Удаляем webhook
-          await bot.deleteWebHook();
-          // Ждем немного
-          await new Promise((resolve) => setTimeout(resolve, 2000));
-          // Запускаем polling заново
-          await bot.startPolling();
-          console.log("Polling успішно перезапущено");
-        } catch (restartError) {
-          console.error(
-            "Помилка при перезапуску polling:",
-            restartError.message
-          );
-        }
-      }
-    });
-
-    return bot;
-  } catch (error) {
-    console.error("Помилка при ініціалізації бота:", error.message);
-    throw error;
-  }
-}
-
-// Инициализация бота
-let bot;
-initializeBot()
-  .then((initializedBot) => {
-    bot = initializedBot;
-    console.log("Бот успішно ініціалізовано");
-  })
-  .catch((error) => {
-    console.error("Не вдалося ініціалізувати бота:", error.message);
-    process.exit(1);
-  });
-
 // Хранение списка доменов для каждого пользователя
 const userDomains = new Map();
 
@@ -200,195 +139,254 @@ function startAutoCheck(chatId) {
   scheduleNextCheck();
 }
 
-// Обработка команды /start
-bot.onText(/\/start/, (msg) => {
-  const chatId = msg.chat.id;
-  bot.sendMessage(
-    chatId,
-    "Вітаю! Я бот для перевірки доменів.\n\n" +
-      "Доступні команди:\n" +
-      "/add domain1.com, domain2.com - додати один або кілька доменів до списку\n" +
-      "/remove domain1.com, domain2.com - видалити один або кілька доменів зі списку\n" +
-      "/list - показати список доменів\n" +
-      "/check - перевірити всі домени в списку\n" +
-      "/autocheck - увімкнути автоматичну перевірку о 12:00 щодня\n\n" +
-      "Ви можете додавати домени у будь-якому форматі:\n" +
-      "- domain.com\n" +
-      "- domain . com\n" +
-      "- http://domain.com\n" +
-      "- https://domain.com\n" +
-      "- www.domain.com\n\n" +
-      "Підтримуються будь-які домени з будь-якими TLD (наприклад: .com, .net, .org, .ru, .ua тощо)"
-  );
-
-  // Запускаем автоматическую проверку при старте
-  startAutoCheck(chatId);
-});
-
-// Добавление доменов
-bot.onText(/\/add (.+)/, (msg, match) => {
-  const chatId = msg.chat.id;
+// Функция для инициализации бота
+async function initializeBot() {
   try {
-    // Разбиваем строку на домены по запятой
-    const domains = match[1].split(",").map((d) => d.trim());
+    // Сначала удаляем все webhook'и
+    const tempBot = new TelegramBot(process.env.BOT_TOKEN);
+    await tempBot.deleteWebHook();
 
-    if (!userDomains.has(chatId)) {
-      userDomains.set(chatId, new Set());
-    }
+    // Создаем основной экземпляр бота
+    const bot = new TelegramBot(process.env.BOT_TOKEN, {
+      polling: {
+        interval: 300,
+        autoStart: true,
+        params: {
+          timeout: 10,
+        },
+      },
+    });
 
-    const addedDomains = [];
-    const errors = [];
-
-    // Обрабатываем каждый домен
-    for (const domain of domains) {
-      try {
-        const normalizedDomain = normalizeDomain(domain);
-        userDomains.get(chatId).add(normalizedDomain);
-        addedDomains.push(normalizedDomain);
-      } catch (error) {
-        errors.push(`${domain}: ${error.message}`);
-      }
-    }
-
-    // Формируем сообщение о результатах
-    let message = "";
-    if (addedDomains.length > 0) {
-      message += `✅ Успішно додано доменів: ${addedDomains.length}\n`;
-      message += addedDomains.join("\n") + "\n\n";
-    }
-
-    if (errors.length > 0) {
-      message += `❌ Помилки при додаванні:\n`;
-      message += errors.join("\n");
-    }
-
-    bot.sendMessage(chatId, message || "Не вдалося додати жодного домену");
-  } catch (error) {
-    bot.sendMessage(chatId, `Помилка: ${error.message}`);
-  }
-});
-
-// Удаление доменов
-bot.onText(/\/remove (.+)/, (msg, match) => {
-  const chatId = msg.chat.id;
-  try {
-    // Разбиваем строку на домены по запятой
-    const domains = match[1].split(",").map((d) => d.trim());
-
-    if (!userDomains.has(chatId)) {
-      bot.sendMessage(chatId, "Список доменів порожній!");
-      return;
-    }
-
-    const removedDomains = [];
-    const notFoundDomains = [];
-
-    // Обрабатываем каждый домен
-    for (const domain of domains) {
-      try {
-        const normalizedDomain = normalizeDomain(domain);
-        if (userDomains.get(chatId).has(normalizedDomain)) {
-          userDomains.get(chatId).delete(normalizedDomain);
-          removedDomains.push(normalizedDomain);
-        } else {
-          notFoundDomains.push(normalizedDomain);
+    // Обработка ошибок polling
+    bot.on("polling_error", async (error) => {
+      console.error("Polling error:", error.message);
+      if (error.message.includes("409 Conflict")) {
+        console.log("Спроба вирішити конфлікт polling...");
+        try {
+          // Останавливаем текущий polling
+          await bot.stopPolling();
+          // Удаляем webhook
+          await bot.deleteWebHook();
+          // Ждем немного
+          await new Promise((resolve) => setTimeout(resolve, 2000));
+          // Запускаем polling заново
+          await bot.startPolling();
+          console.log("Polling успішно перезапущено");
+        } catch (restartError) {
+          console.error(
+            "Помилка при перезапуску polling:",
+            restartError.message
+          );
         }
-      } catch (error) {
-        notFoundDomains.push(`${domain}: ${error.message}`);
       }
-    }
+    });
 
-    // Формируем сообщение о результатах
-    let message = "";
-    if (removedDomains.length > 0) {
-      message += `✅ Успішно видалено доменів: ${removedDomains.length}\n`;
-      message += removedDomains.join("\n") + "\n\n";
-    }
+    // Обработчики команд
+    bot.onText(/\/start/, (msg) => {
+      const chatId = msg.chat.id;
+      bot.sendMessage(
+        chatId,
+        "Вітаю! Я бот для перевірки доменів.\n\n" +
+          "Доступні команди:\n" +
+          "/add domain1.com, domain2.com - додати один або кілька доменів до списку\n" +
+          "/remove domain1.com, domain2.com - видалити один або кілька доменів зі списку\n" +
+          "/list - показати список доменів\n" +
+          "/check - перевірити всі домени в списку\n" +
+          "/autocheck - увімкнути автоматичну перевірку о 12:00 щодня\n\n" +
+          "Ви можете додавати домени у будь-якому форматі:\n" +
+          "- domain.com\n" +
+          "- domain . com\n" +
+          "- http://domain.com\n" +
+          "- https://domain.com\n" +
+          "- www.domain.com\n\n" +
+          "Підтримуються будь-які домени з будь-якими TLD (наприклад: .com, .net, .org, .ru, .ua тощо)"
+      );
 
-    if (notFoundDomains.length > 0) {
-      message += `❌ Не знайдено в списку:\n`;
-      message += notFoundDomains.join("\n");
-    }
+      // Запускаем автоматическую проверку при старте
+      startAutoCheck(chatId);
+    });
 
-    bot.sendMessage(chatId, message || "Не вдалося видалити жодного домену");
+    bot.onText(/\/add (.+)/, (msg, match) => {
+      const chatId = msg.chat.id;
+      try {
+        // Разбиваем строку на домены по запятой
+        const domains = match[1].split(",").map((d) => d.trim());
+
+        if (!userDomains.has(chatId)) {
+          userDomains.set(chatId, new Set());
+        }
+
+        const addedDomains = [];
+        const errors = [];
+
+        // Обрабатываем каждый домен
+        for (const domain of domains) {
+          try {
+            const normalizedDomain = normalizeDomain(domain);
+            userDomains.get(chatId).add(normalizedDomain);
+            addedDomains.push(normalizedDomain);
+          } catch (error) {
+            errors.push(`${domain}: ${error.message}`);
+          }
+        }
+
+        // Формируем сообщение о результатах
+        let message = "";
+        if (addedDomains.length > 0) {
+          message += `✅ Успішно додано доменів: ${addedDomains.length}\n`;
+          message += addedDomains.join("\n") + "\n\n";
+        }
+
+        if (errors.length > 0) {
+          message += `❌ Помилки при додаванні:\n`;
+          message += errors.join("\n");
+        }
+
+        bot.sendMessage(chatId, message || "Не вдалося додати жодного домену");
+      } catch (error) {
+        bot.sendMessage(chatId, `Помилка: ${error.message}`);
+      }
+    });
+
+    bot.onText(/\/remove (.+)/, (msg, match) => {
+      const chatId = msg.chat.id;
+      try {
+        // Разбиваем строку на домены по запятой
+        const domains = match[1].split(",").map((d) => d.trim());
+
+        if (!userDomains.has(chatId)) {
+          bot.sendMessage(chatId, "Список доменів порожній!");
+          return;
+        }
+
+        const removedDomains = [];
+        const notFoundDomains = [];
+
+        // Обрабатываем каждый домен
+        for (const domain of domains) {
+          try {
+            const normalizedDomain = normalizeDomain(domain);
+            if (userDomains.get(chatId).has(normalizedDomain)) {
+              userDomains.get(chatId).delete(normalizedDomain);
+              removedDomains.push(normalizedDomain);
+            } else {
+              notFoundDomains.push(normalizedDomain);
+            }
+          } catch (error) {
+            notFoundDomains.push(`${domain}: ${error.message}`);
+          }
+        }
+
+        // Формируем сообщение о результатах
+        let message = "";
+        if (removedDomains.length > 0) {
+          message += `✅ Успішно видалено доменів: ${removedDomains.length}\n`;
+          message += removedDomains.join("\n") + "\n\n";
+        }
+
+        if (notFoundDomains.length > 0) {
+          message += `❌ Не знайдено в списку:\n`;
+          message += notFoundDomains.join("\n");
+        }
+
+        bot.sendMessage(
+          chatId,
+          message || "Не вдалося видалити жодного домену"
+        );
+      } catch (error) {
+        bot.sendMessage(chatId, `Помилка: ${error.message}`);
+      }
+    });
+
+    bot.onText(/\/list/, (msg) => {
+      const chatId = msg.chat.id;
+
+      if (!userDomains.has(chatId) || userDomains.get(chatId).size === 0) {
+        bot.sendMessage(chatId, "Список доменів порожній!");
+        return;
+      }
+
+      const domains = Array.from(userDomains.get(chatId)).join("\n");
+      bot.sendMessage(chatId, `Ваш список доменів:\n${domains}`);
+    });
+
+    bot.onText(/\/check/, async (msg) => {
+      const chatId = msg.chat.id;
+
+      if (!userDomains.has(chatId) || userDomains.get(chatId).size === 0) {
+        bot.sendMessage(chatId, "Список доменів порожній!");
+        return;
+      }
+
+      const domains = Array.from(userDomains.get(chatId));
+      const results = [];
+
+      // Проверяем все домены и сохраняем результаты
+      for (const domain of domains) {
+        const isAvailable = await checkDomain(domain);
+        results.push({
+          domain: domain,
+          isAvailable: isAvailable,
+        });
+      }
+
+      // Сортируем результаты: сначала недоступные, потом доступные
+      results.sort((a, b) => {
+        if (a.isAvailable === b.isAvailable) {
+          return a.domain.localeCompare(b.domain); // Сортировка по алфавиту внутри групп
+        }
+        return a.isAvailable ? 1 : -1; // Недоступные сначала
+      });
+
+      // Формируем сообщение
+      let message = "Результати перевірки:\n\n";
+
+      // Добавляем недоступные домены
+      const unavailableDomains = results.filter((r) => !r.isAvailable);
+      if (unavailableDomains.length > 0) {
+        message += "❌ Недоступні домени:\n";
+        unavailableDomains.forEach((r) => {
+          message += `${r.domain}\n`;
+        });
+        message += "\n";
+      }
+
+      // Добавляем доступные домены
+      const availableDomains = results.filter((r) => r.isAvailable);
+      if (availableDomains.length > 0) {
+        message += "✅ Доступні домени:\n";
+        availableDomains.forEach((r) => {
+          message += `${r.domain}\n`;
+        });
+      }
+
+      bot.sendMessage(chatId, message);
+    });
+
+    bot.onText(/\/autocheck/, (msg) => {
+      const chatId = msg.chat.id;
+      startAutoCheck(chatId);
+      bot.sendMessage(
+        chatId,
+        "Автоматична перевірка доменів увімкнена! Перевірка буде виконуватися о 12:00 щодня."
+      );
+    });
+
+    return bot;
   } catch (error) {
-    bot.sendMessage(chatId, `Помилка: ${error.message}`);
+    console.error("Помилка при ініціалізації бота:", error.message);
+    throw error;
   }
-});
+}
 
-// Показать список доменов
-bot.onText(/\/list/, (msg) => {
-  const chatId = msg.chat.id;
-
-  if (!userDomains.has(chatId) || userDomains.get(chatId).size === 0) {
-    bot.sendMessage(chatId, "Список доменів порожній!");
-    return;
-  }
-
-  const domains = Array.from(userDomains.get(chatId)).join("\n");
-  bot.sendMessage(chatId, `Ваш список доменів:\n${domains}`);
-});
-
-// Проверка всех доменов
-bot.onText(/\/check/, async (msg) => {
-  const chatId = msg.chat.id;
-
-  if (!userDomains.has(chatId) || userDomains.get(chatId).size === 0) {
-    bot.sendMessage(chatId, "Список доменів порожній!");
-    return;
-  }
-
-  const domains = Array.from(userDomains.get(chatId));
-  const results = [];
-
-  // Проверяем все домены и сохраняем результаты
-  for (const domain of domains) {
-    const isAvailable = await checkDomain(domain);
-    results.push({
-      domain: domain,
-      isAvailable: isAvailable,
-    });
-  }
-
-  // Сортируем результаты: сначала недоступные, потом доступные
-  results.sort((a, b) => {
-    if (a.isAvailable === b.isAvailable) {
-      return a.domain.localeCompare(b.domain); // Сортировка по алфавиту внутри групп
-    }
-    return a.isAvailable ? 1 : -1; // Недоступные сначала
+// Инициализация бота
+let bot;
+initializeBot()
+  .then((initializedBot) => {
+    bot = initializedBot;
+    console.log("Бот успішно ініціалізовано");
+  })
+  .catch((error) => {
+    console.error("Не вдалося ініціалізувати бота:", error.message);
+    process.exit(1);
   });
-
-  // Формируем сообщение
-  let message = "Результати перевірки:\n\n";
-
-  // Добавляем недоступные домены
-  const unavailableDomains = results.filter((r) => !r.isAvailable);
-  if (unavailableDomains.length > 0) {
-    message += "❌ Недоступні домени:\n";
-    unavailableDomains.forEach((r) => {
-      message += `${r.domain}\n`;
-    });
-    message += "\n";
-  }
-
-  // Добавляем доступные домены
-  const availableDomains = results.filter((r) => r.isAvailable);
-  if (availableDomains.length > 0) {
-    message += "✅ Доступні домени:\n";
-    availableDomains.forEach((r) => {
-      message += `${r.domain}\n`;
-    });
-  }
-
-  bot.sendMessage(chatId, message);
-});
-
-// Команда для включения автоматической проверки
-bot.onText(/\/autocheck/, (msg) => {
-  const chatId = msg.chat.id;
-  startAutoCheck(chatId);
-  bot.sendMessage(
-    chatId,
-    "Автоматична перевірка доменів увімкнена! Перевірка буде виконуватися о 12:00 щодня."
-  );
-});
