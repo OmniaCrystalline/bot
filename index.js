@@ -231,14 +231,20 @@ async function initializeBot() {
       startAutoCheck(chatId);
     });
 
-    bot.onText(/\/add (.+)/, (msg, match) => {
+    bot.onText(/\/add/, (msg) => {
       const chatId = msg.chat.id;
       try {
-        console.log("Отримано команду /add з параметрами:", match[1]);
+        // Получаем текст сообщения
+        const text = msg.text;
+        console.log("Отримано повідомлення:", text);
 
-        // Разбиваем строку на домены по запятой или переносу строки
-        const domains = match[1]
-          .split(/[,\n]/) // Разделяем по запятой или переносу строки
+        // Убираем команду /add и разбиваем на строки
+        const domainsText = text.replace(/^\/add\s*/, "").trim();
+        console.log("Текст після видалення команди:", domainsText);
+
+        // Разбиваем на домены по переносу строки или запятой
+        const domains = domainsText
+          .split(/[\n,]+/) // Разделяем по переносу строки или запятой
           .map((d) => d.trim()) // Убираем пробелы
           .filter((d) => d.length > 0); // Убираем пустые строки
 
