@@ -604,22 +604,27 @@ async function gracefulShutdown() {
     console.log("Дані збережено");
 
     console.log("Завершення роботи успішне");
-    process.exit(0);
+    // Замість завершення роботи, перезапускаємо бота
+    console.log("Перезапускаємо бота...");
+    setTimeout(restartBot, 5000);
   } catch (error) {
     console.error("Помилка при завершенні роботи:", error);
-    process.exit(1);
+    // Замість завершення роботи, перезапускаємо бота
+    setTimeout(restartBot, 5000);
   }
 }
 
 // Обробка сигналів завершення
 process.on("SIGTERM", () => {
-  console.log("Отримано сигнал SIGTERM");
-  gracefulShutdown();
+  console.log("Отримано сигнал SIGTERM, ігноруємо і продовжуємо роботу");
+  // Не викликаємо gracefulShutdown, а просто перезапускаємо бота
+  setTimeout(restartBot, 5000);
 });
 
 process.on("SIGINT", () => {
-  console.log("Отримано сигнал SIGINT");
-  gracefulShutdown();
+  console.log("Отримано сигнал SIGINT, ігноруємо і продовжуємо роботу");
+  // Не викликаємо gracefulShutdown, а просто перезапускаємо бота
+  setTimeout(restartBot, 5000);
 });
 
 // Обробка необроблених помилок
@@ -633,6 +638,16 @@ process.on("unhandledRejection", (reason, promise) => {
   console.error("Необроблена відмова промісу:", reason);
   // Замість завершення роботи, пробуємо перезапустити бота
   setTimeout(restartBot, 5000);
+});
+
+// Додаємо обробку помилок процесу
+process.on("exit", (code) => {
+  console.log(`Процес завершується з кодом ${code}, перезапускаємо...`);
+  // Запускаємо новий процес
+  require("child_process").spawn(process.argv[0], process.argv.slice(1), {
+    detached: true,
+    stdio: "inherit",
+  });
 });
 
 // Функція для автоматичного збереження при змінах
