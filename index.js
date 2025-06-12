@@ -226,30 +226,33 @@ async function initializeBot() {
     const tempBot = new TelegramBot(process.env.BOT_TOKEN);
     await tempBot.deleteWebHook();
 
-    // Создаем основной экземпляр бота
+    // Создаем основной экземпляр бота с улучшенными настройками
     const bot = new TelegramBot(process.env.BOT_TOKEN, {
       polling: {
         interval: 300,
         autoStart: true,
         params: {
-          timeout: 10,
+          timeout: 30, // Увеличиваем таймаут
         },
+        retryAfter: 5, // Добавляем задержку перед повторной попыткой
+      },
+      request: {
+        timeout: 30000, // Увеличиваем таймаут запросов
+        proxy: process.env.HTTPS_PROXY, // Поддержка прокси если настроен
       },
     });
 
-    // Обработка ошибок polling
+    // Улучшенная обработка ошибок polling
     bot.on("polling_error", async (error) => {
       console.error("Polling error:", error.message);
+
+      // Обработка различных типов ошибок
       if (error.message.includes("409 Conflict")) {
         console.log("Спроба вирішити конфлікт polling...");
         try {
-          // Останавливаем текущий polling
           await bot.stopPolling();
-          // Удаляем webhook
           await bot.deleteWebHook();
-          // Ждем немного
-          await new Promise((resolve) => setTimeout(resolve, 2000));
-          // Запускаем polling заново
+          await new Promise((resolve) => setTimeout(resolve, 5000)); // Увеличиваем задержку
           await bot.startPolling();
           console.log("Polling успішно перезапущено");
         } catch (restartError) {
@@ -257,8 +260,30 @@ async function initializeBot() {
             "Помилка при перезапуску polling:",
             restartError.message
           );
+          // Пробуем перезапустить бота через некоторое время
+          setTimeout(() => initializeBot(), 30000);
+        }
+      } else if (
+        error.message.includes("ECONNRESET") ||
+        error.message.includes("ETIMEDOUT")
+      ) {
+        console.log("Проблема з підключенням, спроба перепідключення...");
+        try {
+          await bot.stopPolling();
+          await new Promise((resolve) => setTimeout(resolve, 10000));
+          await bot.startPolling();
+          console.log("Підключення відновлено");
+        } catch (reconnectError) {
+          console.error("Помилка при перепідключенні:", reconnectError.message);
+          setTimeout(() => initializeBot(), 30000);
         }
       }
+    });
+
+    // Добавляем обработчик для общей ошибки
+    bot.on("error", (error) => {
+      console.error("Загальна помилка бота:", error.message);
+      setTimeout(() => initializeBot(), 30000);
     });
 
     // Обработчики команд
