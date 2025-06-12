@@ -289,6 +289,37 @@ async function restartBot() {
   }
 }
 
+// Функция для перевірки стану бота
+async function checkBotStatus() {
+  try {
+    if (!bot) {
+      console.log("Бот не ініціалізований, спроба перезапуску...");
+      await restartBot();
+      return;
+    }
+
+    // Відправляємо тестовий запит до API Telegram
+    await bot.getMe();
+    console.log("Бот активний, з'єднання працює");
+  } catch (error) {
+    console.error("Помилка при перевірці стану бота:", error.message);
+    console.log("Спроба перезапуску бота...");
+    await restartBot();
+  }
+}
+
+// Функція для підтримки активного з'єднання
+async function keepAlive() {
+  try {
+    if (!bot) return;
+
+    // Відправляємо пустий запит для підтримки з'єднання
+    await bot.getMe();
+  } catch (error) {
+    console.error("Помилка при підтримці з'єднання:", error.message);
+  }
+}
+
 // Функция для инициализации бота
 async function initializeBot() {
   try {
@@ -299,31 +330,35 @@ async function initializeBot() {
     // Створюємо основний екземпляр бота з покращеними налаштуваннями
     const bot = new TelegramBot(process.env.BOT_TOKEN, {
       polling: {
-        interval: 1000, // Збільшуємо інтервал
+        interval: 1000,
         autoStart: true,
         params: {
-          timeout: 60, // Збільшуємо таймаут
+          timeout: 60,
           limit: 100,
           offset: 0,
           allowed_updates: ["message", "callback_query"],
         },
-        retryAfter: 10, // Збільшуємо затримку перед повторною спробою
+        retryAfter: 10,
       },
       request: {
-        timeout: 60000, // Збільшуємо таймаут запитів
+        timeout: 60000,
         proxy: process.env.HTTPS_PROXY,
-        simple: false, // Дозволяємо повні відповіді
-        forever: true, // Використовуємо keep-alive
+        simple: false,
+        forever: true,
         keepAlive: true,
         keepAliveMsecs: 30000,
       },
     });
 
+    // Запускаємо періодичну перевірку стану бота
+    setInterval(checkBotStatus, 5 * 60 * 1000); // Кожні 5 хвилин
+
+    // Запускаємо підтримку активного з'єднання
+    setInterval(keepAlive, 30 * 60 * 1000); // Кожні 30 хвилин
+
     // Покращена обробка помилок polling
     bot.on("polling_error", async (error) => {
       console.error("Polling error:", error.message);
-
-      // Додаємо більше інформації про помилку
       console.error("Повна помилка:", error);
 
       if (
@@ -335,21 +370,13 @@ async function initializeBot() {
         console.log("Спроба перезапуску через помилку polling...");
 
         try {
-          // Зупиняємо поточний polling
           await bot.stopPolling();
-
-          // Видаляємо webhook
           await bot.deleteWebHook();
-
-          // Чекаємо довше перед перезапуском
           await new Promise((resolve) => setTimeout(resolve, 10000));
-
-          // Перезапускаємо polling
           await bot.startPolling();
           console.log("Polling успішно перезапущено");
         } catch (restartError) {
           console.error("Помилка при перезапуску polling:", restartError);
-          // Якщо не вдалося перезапустити polling, перезапускаємо бота
           setTimeout(restartBot, 30000);
         }
       }
