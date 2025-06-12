@@ -282,29 +282,29 @@ async function restartBot() {
     }
     bot = await initializeBot();
     console.log("Бот успішно перезапущено");
+    return true;
   } catch (error) {
     console.error("Помилка при перезапуску бота:", error.message);
-    // Пробуємо перезапустити через 30 секунд
-    setTimeout(restartBot, 30000);
+    return false;
   }
 }
 
-// Функция для перевірки стану бота
+// Функція для перевірки стану бота
 async function checkBotStatus() {
   try {
     if (!bot) {
       console.log("Бот не ініціалізований, спроба перезапуску...");
-      await restartBot();
-      return;
+      return await restartBot();
     }
 
     // Відправляємо тестовий запит до API Telegram
     await bot.getMe();
     console.log("Бот активний, з'єднання працює");
+    return true;
   } catch (error) {
     console.error("Помилка при перевірці стану бота:", error.message);
     console.log("Спроба перезапуску бота...");
-    await restartBot();
+    return await restartBot();
   }
 }
 
@@ -400,27 +400,54 @@ async function initializeBot() {
     });
 
     // Обработчики команд
-    bot.onText(/\/start/, (msg) => {
+    bot.onText(/\/start/, async (msg) => {
       const chatId = msg.chat.id;
-      bot.sendMessage(
-        chatId,
-        "Вітаю! Я бот для перевірки доменів.\n\n" +
-          "Доступні команди:\n" +
-          "/add domain1.com, domain2.com - додати один або кілька доменів до списку\n" +
-          "/remove domain1.com, domain2.com - видалити один або кілька доменів зі списку\n" +
-          "/list - показати список доменів\n" +
-          "/check - перевірити всі домени в списку\n" +
-          "/autocheck - увімкнути автоматичну перевірку о 12:00 щодня\n\n" +
-          "Ви можете додавати домени у будь-якому форматі:\n" +
-          "- domain.com\n" +
-          "- domain . com\n" +
-          "- http://domain.com\n" +
-          "- https://domain.com\n" +
-          "- www.domain.com\n\n" +
-          "Підтримуються будь-які домени з будь-якими TLD (наприклад: .com, .net, .org, .ru, .ua тощо)"
-      );
+      console.log("Отримано команду /start від", chatId);
 
-      // Запускаем автоматическую проверку при старте
+      // Перевіряємо стан бота
+      const isActive = await checkBotStatus();
+
+      if (!isActive) {
+        console.log("Бот неактивний, спроба перезапуску...");
+        const restarted = await restartBot();
+        if (restarted) {
+          bot.sendMessage(
+            chatId,
+            "Бот перезапущено! Тепер я знову активний.\n\n" +
+              "Доступні команди:\n" +
+              "/add domain1.com, domain2.com - додати один або кілька доменів до списку\n" +
+              "/remove domain1.com, domain2.com - видалити один або кілька доменів зі списку\n" +
+              "/list - показати список доменів\n" +
+              "/check - перевірити всі домени в списку\n" +
+              "/autocheck - увімкнути автоматичну перевірку о 12:00 щодня"
+          );
+        } else {
+          bot.sendMessage(
+            chatId,
+            "Вибачте, виникла помилка при перезапуску бота. Спробуйте ще раз через кілька секунд."
+          );
+        }
+      } else {
+        bot.sendMessage(
+          chatId,
+          "Вітаю! Я бот для перевірки доменів.\n\n" +
+            "Доступні команди:\n" +
+            "/add domain1.com, domain2.com - додати один або кілька доменів до списку\n" +
+            "/remove domain1.com, domain2.com - видалити один або кілька доменів зі списку\n" +
+            "/list - показати список доменів\n" +
+            "/check - перевірити всі домени в списку\n" +
+            "/autocheck - увімкнути автоматичну перевірку о 12:00 щодня\n\n" +
+            "Ви можете додавати домени у будь-якому форматі:\n" +
+            "- domain.com\n" +
+            "- domain . com\n" +
+            "- http://domain.com\n" +
+            "- https://domain.com\n" +
+            "- www.domain.com\n\n" +
+            "Підтримуються будь-які домени з будь-якими TLD (наприклад: .com, .net, .org, .ru, .ua тощо)"
+        );
+      }
+
+      // Запускаємо автоматичну перевірку при старті
       startAutoCheck(chatId);
     });
 
