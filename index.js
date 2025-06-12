@@ -37,11 +37,25 @@ function loadDomains() {
     if (fs.existsSync(DOMAINS_FILE)) {
       const data = fs.readFileSync(DOMAINS_FILE, "utf8");
       const domains = JSON.parse(data);
-      // Преобразуем обычные объекты обратно в Map
+
+      // Перевіряємо структуру даних
+      if (typeof domains !== "object") {
+        throw new Error("Невірний формат даних");
+      }
+
+      // Перетворюємо звичайні об'єкти назад в Map
       const userDomains = new Map();
       for (const [chatId, domainSet] of Object.entries(domains)) {
+        if (!Array.isArray(domainSet)) {
+          console.warn(
+            `Пропущено невалідний набір доменів для chatId ${chatId}`
+          );
+          continue;
+        }
         userDomains.set(chatId, new Set(domainSet));
       }
+
+      console.log("Дані успішно завантажено");
       return userDomains;
     }
   } catch (error) {
@@ -53,14 +67,32 @@ function loadDomains() {
 // Функция для сохранения доменов в файл
 function saveDomains(userDomains) {
   try {
-    // Преобразуем Map в обычный объект для сохранения
+    // Створюємо тимчасовий файл
+    const tempFile = `${DOMAINS_FILE}.tmp`;
+
+    // Перетворюємо Map в звичайний об'єкт для збереження
     const domains = {};
     for (const [chatId, domainSet] of userDomains.entries()) {
       domains[chatId] = Array.from(domainSet);
     }
-    fs.writeFileSync(DOMAINS_FILE, JSON.stringify(domains, null, 2));
+
+    // Спочатку записуємо в тимчасовий файл
+    fs.writeFileSync(tempFile, JSON.stringify(domains, null, 2));
+
+    // Перевіряємо, що тимчасовий файл створено і містить валідний JSON
+    const tempData = fs.readFileSync(tempFile, "utf8");
+    JSON.parse(tempData); // Перевірка на валідність JSON
+
+    // Якщо все добре, переміщуємо тимчасовий файл на місце основного
+    fs.renameSync(tempFile, DOMAINS_FILE);
+
+    console.log("Дані успішно збережено");
   } catch (error) {
     console.error("Помилка при збереженні доменів:", error);
+    // Якщо є тимчасовий файл, видаляємо його
+    if (fs.existsSync(`${DOMAINS_FILE}.tmp`)) {
+      fs.unlinkSync(`${DOMAINS_FILE}.tmp`);
+    }
   }
 }
 
@@ -241,71 +273,63 @@ function startAutoCheck(chatId) {
   scheduleNextCheck();
 }
 
+// Функция для перезапуску бота
+async function restartBot() {
+  console.log("Спроба перезапуску бота...");
+  try {
+    if (bot) {
+      await bot.stopPolling();
+    }
+    bot = await initializeBot();
+    console.log("Бот успішно перезапущено");
+  } catch (error) {
+    console.error("Помилка при перезапуску бота:", error.message);
+    // Пробуємо перезапустити через 30 секунд
+    setTimeout(restartBot, 30000);
+  }
+}
+
 // Функция для инициализации бота
 async function initializeBot() {
   try {
-    // Сначала удаляем все webhook'и
+    // Спочатку видаляємо всі webhook'и
     const tempBot = new TelegramBot(process.env.BOT_TOKEN);
     await tempBot.deleteWebHook();
 
-    // Создаем основной экземпляр бота с улучшенными настройками
+    // Створюємо основний екземпляр бота з покращеними налаштуваннями
     const bot = new TelegramBot(process.env.BOT_TOKEN, {
       polling: {
         interval: 300,
         autoStart: true,
         params: {
-          timeout: 30, // Увеличиваем таймаут
+          timeout: 30,
         },
-        retryAfter: 5, // Добавляем задержку перед повторной попыткой
+        retryAfter: 5,
       },
       request: {
-        timeout: 30000, // Увеличиваем таймаут запросов
-        proxy: process.env.HTTPS_PROXY, // Поддержка прокси если настроен
+        timeout: 30000,
+        proxy: process.env.HTTPS_PROXY,
       },
     });
 
-    // Улучшенная обработка ошибок polling
+    // Покращена обробка помилок polling
     bot.on("polling_error", async (error) => {
       console.error("Polling error:", error.message);
 
-      // Обработка различных типов ошибок
-      if (error.message.includes("409 Conflict")) {
-        console.log("Спроба вирішити конфлікт polling...");
-        try {
-          await bot.stopPolling();
-          await bot.deleteWebHook();
-          await new Promise((resolve) => setTimeout(resolve, 5000)); // Увеличиваем задержку
-          await bot.startPolling();
-          console.log("Polling успішно перезапущено");
-        } catch (restartError) {
-          console.error(
-            "Помилка при перезапуску polling:",
-            restartError.message
-          );
-          // Пробуем перезапустить бота через некоторое время
-          setTimeout(() => initializeBot(), 30000);
-        }
-      } else if (
+      if (
+        error.message.includes("409 Conflict") ||
         error.message.includes("ECONNRESET") ||
         error.message.includes("ETIMEDOUT")
       ) {
-        console.log("Проблема з підключенням, спроба перепідключення...");
-        try {
-          await bot.stopPolling();
-          await new Promise((resolve) => setTimeout(resolve, 10000));
-          await bot.startPolling();
-          console.log("Підключення відновлено");
-        } catch (reconnectError) {
-          console.error("Помилка при перепідключенні:", reconnectError.message);
-          setTimeout(() => initializeBot(), 30000);
-        }
+        console.log("Спроба перезапуску через помилку polling...");
+        setTimeout(restartBot, 5000);
       }
     });
 
-    // Добавляем обработчик для общей ошибки
+    // Додаємо обробник для загальної помилки
     bot.on("error", (error) => {
       console.error("Загальна помилка бота:", error.message);
-      setTimeout(() => initializeBot(), 30000);
+      setTimeout(restartBot, 5000);
     });
 
     // Обработчики команд
@@ -544,22 +568,77 @@ initializeBot()
   })
   .catch((error) => {
     console.error("Не вдалося ініціалізувати бота:", error.message);
-    process.exit(1);
+    // Замість завершення роботи, пробуємо перезапустити через 30 секунд
+    setTimeout(restartBot, 30000);
   });
 
-// Обработка завершения процесса
-process.on("SIGTERM", () => {
-  console.log("Отримано сигнал SIGTERM, закриваємо сервер...");
-  server.close(() => {
-    console.log("HTTP сервер закрито");
+// Функция для корректного завершения работы
+async function gracefulShutdown() {
+  console.log("Починаємо процес завершення роботи...");
+
+  try {
+    // Зупиняємо бота
+    if (bot) {
+      console.log("Зупиняємо бота...");
+      await bot.stopPolling();
+      console.log("Бот зупинено");
+    }
+
+    // Закриваємо HTTP-сервер
+    console.log("Закриваємо HTTP сервер...");
+    await new Promise((resolve, reject) => {
+      server.close((err) => {
+        if (err) {
+          console.error("Помилка при закритті сервера:", err);
+          reject(err);
+        } else {
+          console.log("HTTP сервер закрито");
+          resolve();
+        }
+      });
+    });
+
+    // Зберігаємо дані перед виходом
+    console.log("Зберігаємо дані...");
+    saveDomains(userDomains);
+    console.log("Дані збережено");
+
+    console.log("Завершення роботи успішне");
     process.exit(0);
-  });
+  } catch (error) {
+    console.error("Помилка при завершенні роботи:", error);
+    process.exit(1);
+  }
+}
+
+// Обробка сигналів завершення
+process.on("SIGTERM", () => {
+  console.log("Отримано сигнал SIGTERM");
+  gracefulShutdown();
 });
 
 process.on("SIGINT", () => {
-  console.log("Отримано сигнал SIGINT, закриваємо сервер...");
-  server.close(() => {
-    console.log("HTTP сервер закрито");
-    process.exit(0);
-  });
+  console.log("Отримано сигнал SIGINT");
+  gracefulShutdown();
 });
+
+// Обробка необроблених помилок
+process.on("uncaughtException", (error) => {
+  console.error("Необроблена помилка:", error);
+  // Замість завершення роботи, пробуємо перезапустити бота
+  setTimeout(restartBot, 5000);
+});
+
+process.on("unhandledRejection", (reason, promise) => {
+  console.error("Необроблена відмова промісу:", reason);
+  // Замість завершення роботи, пробуємо перезапустити бота
+  setTimeout(restartBot, 5000);
+});
+
+// Функція для автоматичного збереження при змінах
+function autoSave() {
+  saveDomains(userDomains);
+}
+
+// Додаємо автоматичне збереження кожні 5 хвилин
+setInterval(autoSave, 5 * 60 * 1000);
