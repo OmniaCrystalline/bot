@@ -5,6 +5,28 @@ const TelegramBot = require("node-telegram-bot-api");
 const axios = require("axios");
 const fs = require("fs");
 const path = require("path");
+const http = require("http");
+
+// Получаем порт из переменных окружения или используем порт по умолчанию
+const PORT = process.env.PORT || 3000;
+
+// Создаем HTTP-сервер для health-check
+const server = http.createServer((req, res) => {
+  if (req.url === "/health") {
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(
+      JSON.stringify({ status: "ok", timestamp: new Date().toISOString() })
+    );
+  } else {
+    res.writeHead(404);
+    res.end();
+  }
+});
+
+// Запускаем сервер
+server.listen(PORT, () => {
+  console.log(`HTTP сервер запущено на порту ${PORT}`);
+});
 
 // Путь к файлу с доменами
 const DOMAINS_FILE = path.join(__dirname, "domains.json");
@@ -524,3 +546,20 @@ initializeBot()
     console.error("Не вдалося ініціалізувати бота:", error.message);
     process.exit(1);
   });
+
+// Обработка завершения процесса
+process.on("SIGTERM", () => {
+  console.log("Отримано сигнал SIGTERM, закриваємо сервер...");
+  server.close(() => {
+    console.log("HTTP сервер закрито");
+    process.exit(0);
+  });
+});
+
+process.on("SIGINT", () => {
+  console.log("Отримано сигнал SIGINT, закриваємо сервер...");
+  server.close(() => {
+    console.log("HTTP сервер закрито");
+    process.exit(0);
+  });
+});
