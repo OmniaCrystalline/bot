@@ -299,16 +299,23 @@ async function initializeBot() {
     // Створюємо основний екземпляр бота з покращеними налаштуваннями
     const bot = new TelegramBot(process.env.BOT_TOKEN, {
       polling: {
-        interval: 300,
+        interval: 1000, // Збільшуємо інтервал
         autoStart: true,
         params: {
-          timeout: 30,
+          timeout: 60, // Збільшуємо таймаут
+          limit: 100,
+          offset: 0,
+          allowed_updates: ["message", "callback_query"],
         },
-        retryAfter: 5,
+        retryAfter: 10, // Збільшуємо затримку перед повторною спробою
       },
       request: {
-        timeout: 30000,
+        timeout: 60000, // Збільшуємо таймаут запитів
         proxy: process.env.HTTPS_PROXY,
+        simple: false, // Дозволяємо повні відповіді
+        forever: true, // Використовуємо keep-alive
+        keepAlive: true,
+        keepAliveMsecs: 30000,
       },
     });
 
@@ -316,20 +323,53 @@ async function initializeBot() {
     bot.on("polling_error", async (error) => {
       console.error("Polling error:", error.message);
 
+      // Додаємо більше інформації про помилку
+      console.error("Повна помилка:", error);
+
       if (
         error.message.includes("409 Conflict") ||
         error.message.includes("ECONNRESET") ||
-        error.message.includes("ETIMEDOUT")
+        error.message.includes("ETIMEDOUT") ||
+        error.message.includes("ESOCKETTIMEDOUT")
       ) {
         console.log("Спроба перезапуску через помилку polling...");
-        setTimeout(restartBot, 5000);
+
+        try {
+          // Зупиняємо поточний polling
+          await bot.stopPolling();
+
+          // Видаляємо webhook
+          await bot.deleteWebHook();
+
+          // Чекаємо довше перед перезапуском
+          await new Promise((resolve) => setTimeout(resolve, 10000));
+
+          // Перезапускаємо polling
+          await bot.startPolling();
+          console.log("Polling успішно перезапущено");
+        } catch (restartError) {
+          console.error("Помилка при перезапуску polling:", restartError);
+          // Якщо не вдалося перезапустити polling, перезапускаємо бота
+          setTimeout(restartBot, 30000);
+        }
       }
     });
 
     // Додаємо обробник для загальної помилки
     bot.on("error", (error) => {
-      console.error("Загальна помилка бота:", error.message);
-      setTimeout(restartBot, 5000);
+      console.error("Загальна помилка бота:", error);
+      console.error("Повна помилка:", error);
+      setTimeout(restartBot, 30000);
+    });
+
+    // Додаємо обробник для успішного підключення
+    bot.on("polling_error", () => {
+      console.log("Polling помилка, спроба перепідключення...");
+    });
+
+    bot.on("webhook_error", (error) => {
+      console.error("Webhook помилка:", error);
+      setTimeout(restartBot, 30000);
     });
 
     // Обработчики команд
